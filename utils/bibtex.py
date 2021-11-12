@@ -159,6 +159,14 @@ class Bibtex(object):
     @property
     def year(self) -> int:
         return int(getattr(self, '__year')) if hasattr(self, '__year') else -1
+    @property
+    def tags(self) -> List[str]:
+        '''list of authors'''
+        if hasattr(self, '__mendeley_tags'):
+            tag_data = getattr(self, '__mendeley_tags')
+            return [tag.strip() for tag in tag_data.split(',')]
+        else:
+            return []
 
     def __str__(self):
         return f'<Bibtex "{" ".join(self.title.split()[:5])}..." >'
@@ -177,27 +185,32 @@ class Bibtex(object):
                 raise KeyError(f'unknown field: {field}')
         return res
 
-def parse(bibtex_dir:StrOrPath) -> List[Bibtex]:
+def parse(bibtex_path:StrOrPath) -> List[Bibtex]:
     '''parse bibtex files'''
-    bibtex_dir:Path = Path(bibtex_dir)
-    assert bibtex_dir.is_dir()
 
-    ptn_bib = re.compile(r'^@[a-zA-Z]+{(?P<BODY>(.|\s)+)}$')
-    ptn_row = re.compile(r'(?P<KEY>[a-zA-Z]+)\s*=\s*[{"]?(?P<VALUE>[^(},)|(",)]+)["}]?,?')
+    ptn_bib = re.compile(r'@[a-zA-Z]*?{(?P<BODY>[\s\S]*?)\n}\n')
+    ptn_row = re.compile(r'(?P<KEY>[^=,\s{}"]+)\s*=\s*[{"]*(?P<VALUE>[^}"]+)["}]?,?')
+
+    bibtex_path:Path = Path(bibtex_path)
+    if bibtex_path.is_dir():
+        bibtex_files = [Path(f) for f in glob(str(bibtex_path / '*.bib'))]
+    else:
+        bibtex_files = [bibtex_path]
 
     bibtex_list = []
-    bibtex_files = [Path(f) for f in glob(str(bibtex_dir / '*.bib'))]
     for bibtex_file in bibtex_files:
         bibtext = open(bibtex_file).read()
-        bibbody = [row.strip() for row in ptn_bib.match(bibtext).group('BODY').split('\n')]
-        bibargs = {}
-        for row in bibbody:
-            m = ptn_row.match(row)
-            if m is not None:
-                key = m.group('KEY')
-                value = m.group('VALUE')
-                bibargs[key] = value
-        bibtex_list.append(Bibtex(**bibargs))
+        bib_all = ptn_bib.findall(bibtext)
+        for bib in bib_all:
+            bibbody = [b.strip() for b in bib.split('\n')]
+            bibargs = {}
+            for row in bibbody:
+                m = ptn_row.match(row)
+                if m is not None:
+                    key = m.group('KEY').replace('-', '_')
+                    value = m.group('VALUE')
+                    bibargs[key] = value
+            bibtex_list.append(Bibtex(**bibargs))
 
     return bibtex_list
 
