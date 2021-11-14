@@ -1,6 +1,8 @@
 from typing import Any, List
 from collections import namedtuple
+from datetime import datetime, timezone, timedelta
 import numpy as np
+from utils.utils import StrOrPath
 
 Author = namedtuple('Author', ('author_id', 'name'))
 RefPaper = namedtuple('RefPaper', ('paper_id', 'title'))
@@ -8,10 +10,18 @@ RefPaper = namedtuple('RefPaper', ('paper_id', 'title'))
 class Paper(object):
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
-            setattr(self, f'__{key}', value)
+            if value is not None:
+                setattr(self, f'__{key}', value)
         
-    def __get(self, key:str, default:Any):
-        return getattr(self, key) if hasattr(self, key) else default
+        if not hasattr(self, '__at'):
+            self.__at = datetime.now().timestamp()
+        
+    def __get(self, key:str, default:Any) -> Any:
+        value = getattr(self, key) if hasattr(self, key) else default
+        if value is None:
+            return default
+        else:
+            return value
 
     @property
     def paper_id(self) -> str:
@@ -36,12 +46,12 @@ class Paper(object):
         return int(self.__get('__referenceCount', default=0))
     @property
     def citation_count(self) -> int:
-        return int(self.__get('__citation_count', default=0))
+        return int(self.__get('__citationCount', default=0))
     @property
     def influential_citation_count(self) -> int:
         return int(self.__get('__influentialCitationCount', default=0))
     @property
-    def isOpenAccess(self) -> bool:
+    def is_open_access(self) -> bool:
         return self.__get('__isOpenAccess', default=False)
     @property
     def fields_of_study(self) -> List[str]:
@@ -49,14 +59,14 @@ class Paper(object):
     @property
     def embedding(self) -> np.ndarray:
         embedding = self.__get('__embedding', default={})
-        if 'vector' in embedding:
+        if embedding is not None and 'vector' in embedding:
             return np.array(embedding['vector'])
         else:
             return np.array([])
     @property
     def embed_model(self) -> str:
         embedding = self.__get('__embedding', default={})
-        if 'model' in embedding:
+        if embedding is not None and 'model' in embedding:
             return embedding['model']
         else:
             return ''
@@ -72,9 +82,34 @@ class Paper(object):
     def references(self) -> List[RefPaper]:
         reference_list = self.__get('__references', default=[])
         return [RefPaper(p['paperId'], p['title']) for p in reference_list]
+    @property
+    def at(self) -> datetime:
+        JST = timezone(timedelta(hours=9))
+        return datetime.fromtimestamp(self.__at, tz=JST)
 
     def __str__(self):
         return f'<Paper id:{self.paper_id} title:{self.title[:15]}... >'
     def __repr__(self):
         return self.__str__()
 
+    def to_dict(self):
+        return {
+            'abstract': self.abstract,
+            'authors': [{'author_id': a.author_id, 'name': a.name} for a in self.authors],
+            'citation_count': self.citation_count,
+            'citations': [{'paper_id': r.paper_id, 'title': r.title} for r in self.citations if r.paper_id is not None],
+            'embed_model': self.embed_model,
+            'embedding': self.embedding.tolist(),
+            'fields_of_study': self.fields_of_study,
+            'influential_citation_count': self.influential_citation_count,
+            'is_open_access': self.is_open_access,
+            'paper_id': self.paper_id,
+            'reference_count': self.reference_count,
+            'references': [{'paper_id': r.paper_id, 'title': r.title} for r in self.references if r.paper_id is not None],
+            'title': self.title,
+            'url': self.url,
+            'venue': self.venue,
+            'year': self.year,
+            'at': self.__at,
+        }
+ 

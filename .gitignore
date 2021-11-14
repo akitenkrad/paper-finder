@@ -133,3 +133,6 @@ data
 
 # .DS_Store
 .DS_Store
+
+# cache
+__cache__
