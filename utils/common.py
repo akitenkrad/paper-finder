@@ -84,11 +84,12 @@ class Paper(object):
         return [RefPaper(p['paperId'], p['title']) for p in reference_list]
     @property
     def at(self) -> datetime:
-        JST = timezone(timedelta(hours=9))
-        return datetime.fromtimestamp(self.__at, tz=JST)
+        ts = self.__get('__at', default=0)
+        jst = timezone(timedelta(hours=9))
+        return datetime.fromtimestamp(ts, tz=jst)
 
     def __str__(self):
-        return f'<Paper id:{self.paper_id} title:{self.title[:15]}... >'
+        return f'<Paper id:{self.paper_id} title:{self.title[:15]}... @{self.at.strftime("%Y.%m.%d-%H:%M:%S")}>'
     def __repr__(self):
         return self.__str__()
 
@@ -110,6 +111,6 @@ class Paper(object):
             'url': self.url,
             'venue': self.venue,
             'year': self.year,
-            'at': self.__at,
+            'at': self.__get('__at', default=0),
         }
  

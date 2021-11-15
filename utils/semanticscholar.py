@@ -72,7 +72,7 @@ class SemanticScholar(object):
             cache (StrOrPath): path to cache. the cache file is assumed to be ".zip" format. 
             export_interval (int): export cache with the specified interval
         '''
-        counter = {'total': 0, 'done': 0, 'new_papers':0, 'cache': Path(cache)}
+        counter = {'total': 0, 'done': 0, 'new_papers':0, 'finished_papers': [], 'cache': Path(cache)}
         start = time.time()
         def process(ss:SemanticScholar, paper:Paper):
             counter['total'] += len(paper.citations)
@@ -82,18 +82,20 @@ class SemanticScholar(object):
                     ss.export(counter['cache'])
                     counter['new_papers'] = 0
 
+                if counter['done'] > 0 and counter['done'] % 100 == 0:
+                    print(f' -> {counter["done"]:5d}/{counter["total"]:5d} ({counter["done"]/counter["total"]*100.0:5.1f}%) | '
+                          f'etime: {timedelta2HMS(int(time.time() - start))} @{now().strftime("%Y.%m.%d-%H:%M:%S")}')
+
                 if citation.paper_id is None:
                     counter['done'] += 1
                     continue
 
                 # get paper
-                is_new = False
                 if citation.paper_id in ss.papers:
                     ci_paper = ss.__papers[citation.paper_id]
                 else:
                     try:
                         ci_paper = self.get_paper_detail(citation.paper_id)
-                        is_new = True
                         ss.__papers[citation.paper_id] = ci_paper
                         counter['new_papers'] += 1
                         time.sleep(3)
@@ -111,7 +113,8 @@ class SemanticScholar(object):
                           f'papers: {len(ss.papers):5d} | '
                           f'{paper.paper_id[:8]} -> {citation.paper_id[:8]} @icc: {ci_paper.influential_citation_count}')
 
-                    if is_new:
+                    if ci_paper.paper_id not in counter['finished_papers']:
+                        counter['finished_papers'].append(ci_paper.paper_id)
                         process(ss, ci_paper)
 
         root_paper:Paper = self.get_paper_detail(paper_id)

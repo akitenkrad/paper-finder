@@ -136,3 +136,6 @@ data
 
 # cache
 __cache__
+
+# .vscode
+.vscode
