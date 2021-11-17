@@ -78,9 +78,12 @@ class SemanticScholar(object):
             counter['total'] += len(paper.citations)
             for citation in paper.citations:
                 
-                if len(ss.papers) > 0 and counter['new_papers'] == export_interval:
+                if len(ss.papers) > 0 and counter['new_papers'] >= export_interval and len(ss.papers) % export_interval == 0:
                     ss.export(counter['cache'])
                     counter['new_papers'] = 0
+                    print(f' -> {counter["done"]:5d}/{counter["total"]:5d} ({counter["done"]/counter["total"]*100.0:5.1f}%) | '
+                          f'etime: {timedelta2HMS(int(time.time() - start))} @{now().strftime("%Y.%m.%d-%H:%M:%S")} | '
+                          f'exported -> {str(Path(counter["cache"]).resolve().absolute())}')
 
                 if counter['done'] > 0 and counter['done'] % 100 == 0:
                     print(f' -> {counter["done"]:5d}/{counter["total"]:5d} ({counter["done"]/counter["total"]*100.0:5.1f}%) | '
@@ -98,7 +101,7 @@ class SemanticScholar(object):
                         ci_paper = self.get_paper_detail(citation.paper_id)
                         ss.__papers[citation.paper_id] = ci_paper
                         counter['new_papers'] += 1
-                        time.sleep(3)
+                        time.sleep(2.5)
 
                     except Exception as ex:
                         print(f'Warning: {ex} @{citation.paper_id}')
@@ -107,7 +110,7 @@ class SemanticScholar(object):
 
                 counter['done'] += 1
                 if ci_paper.influential_citation_count >= min_influential_citation_count:
-                    ss.graph.add_edge(paper.paper_id, citation.paper_id)
+                    self.add_edge(ss.graph, paper, ci_paper)
                     print(f' -> {counter["done"]:5d}/{counter["total"]:5d} ({counter["done"]/counter["total"]*100.0:5.1f}%) | '
                           f'etime: {timedelta2HMS(int(time.time() - start))} @{now().strftime("%Y.%m.%d-%H:%M:%S")} | '
                           f'papers: {len(ss.papers):5d} | '
@@ -120,6 +123,24 @@ class SemanticScholar(object):
         root_paper:Paper = self.get_paper_detail(paper_id)
         process(self, root_paper)
 
+    def add_edge(self, graph:nx.DiGraph, src:Paper, dst:Paper):
+        graph.add_edge(src.paper_id, dst.paper_id)
+        
+        for paper in [src, dst]:
+            if paper.paper_id is None:
+                continue
+            graph.nodes[paper.paper_id]['name'] = paper.paper_id
+            graph.nodes[paper.paper_id]['paper_id'] = paper.paper_id
+            graph.nodes[paper.paper_id]['title'] = paper.title
+            graph.nodes[paper.paper_id]['year'] = paper.year
+            graph.nodes[paper.paper_id]['venue'] = paper.venue
+            graph.nodes[paper.paper_id]['reference_count'] = paper.reference_count
+            graph.nodes[paper.paper_id]['citation_count'] = paper.citation_count
+            graph.nodes[paper.paper_id]['influential_citation_count'] = paper.influential_citation_count
+            graph.nodes[paper.paper_id]['first_author_name'] = paper.authors[0].name if len(paper.authors) > 0 else ''
+            graph.nodes[paper.paper_id]['first_author_id'] = paper.authors[0].author_id if len(paper.authors) > 0 else ''
+            graph.nodes[paper.paper_id]['first_fields_of_study'] = paper.fields_of_study[0] if len(paper.fields_of_study) > 0 else ''
+
     def export(self, out_file:StrOrPath='papers.zip'):
         assert len(self.__papers) > 0, 'Reference graph is not build yet.'
         out_file:Path = Path(out_file)
@@ -131,7 +152,9 @@ class SemanticScholar(object):
                     continue
                 data = paper.to_dict()
                 zf.writestr(f'{paper_id}.json', json.dumps(data, ensure_ascii=False, indent=2))
-        print(f'exported -> {str(out_file.resolve().absolute())}')
+
+        graphml_path = out_file.parent / (out_file.stem + '.graphml')
+        nx.write_graphml_lxml(self.graph, str(graphml_path.resolve().absolute()), encoding='utf-8', prettyprint=True, named_key_ids=True)
 
     @staticmethod
     def from_cache(cache_path:StrOrPath, threshold=0.95):

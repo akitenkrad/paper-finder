@@ -22,6 +22,11 @@ class Paper(object):
             return default
         else:
             return value
+    def __filter_none(self, value:Any, default:Any=''):
+        if value is None:
+            return default
+        else:
+            return value
 
     @property
     def paper_id(self) -> str:
@@ -73,7 +78,7 @@ class Paper(object):
     @property
     def authors(self) -> List[Author]:
         author_list = self.__get('__authors', default=[])
-        return [Author(a['authorId'], a['name']) for a in author_list]
+        return [Author(self.__filter_none(a['authorId']), self.__filter_none(a['name'])) for a in author_list]
     @property
     def citations(self) -> List[RefPaper]:
         citation_list = self.__get('__citations', default=[])
