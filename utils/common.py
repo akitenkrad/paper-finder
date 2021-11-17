@@ -2,7 +2,6 @@ from typing import Any, List
 from collections import namedtuple
 from datetime import datetime, timezone, timedelta
 import numpy as np
-from utils.utils import StrOrPath
 
 Author = namedtuple('Author', ('author_id', 'name'))
 RefPaper = namedtuple('RefPaper', ('paper_id', 'title'))
