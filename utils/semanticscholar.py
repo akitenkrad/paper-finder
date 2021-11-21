@@ -1,10 +1,11 @@
-from typing import Dict
+from typing import Dict, List
 from pathlib import Path
 from attrdict import AttrDict
 import json
 import time
 import zipfile
 from tqdm import tqdm
+from glob import glob
 import urllib.request
 import urllib.parse
 from sumeval.metrics.rouge import RougeCalculator
@@ -19,22 +20,37 @@ class SemanticScholar(object):
         'search_by_id': 'https://api.semanticscholar.org/graph/v1/paper/{PAPER_ID}?{PARAMS}',
     }
     
-    def __init__(self, threshold=0.95):
+    def __init__(self, threshold:float=0.95):
         self.__api = AttrDict(self.API)
         self.__rouge = RougeCalculator(stopwords=True, stemming=False, word_limit=-1, length_limit=-1, lang="en")
         self.__threshold = threshold
-        self.__graph:nx.DiGraph = nx.DiGraph()
-        self.__papers:Dict[str, Paper] = {}
+        self.graph:nx.DiGraph = nx.DiGraph()
+        self.papers:Dict[str, Paper] = {}
 
     @property
     def threshold(self) -> float:
         return self.__threshold
-    @property
-    def graph(self) -> nx.DiGraph:
-        return self.__graph
-    @property
-    def papers(self) -> Dict[str, Paper]:
-        return self.__papers
+
+    def dict2paper(self, paper_data:dict):
+        kwargs = {
+            'paperId': paper_data['paper_id'],
+            'url': paper_data['url'],
+            'title': paper_data['title'],
+            'abstract': paper_data['abstract'],
+            'venue': paper_data['venue'],
+            'year': paper_data['year'],
+            'referenceCount': paper_data['reference_count'],
+            'citationCount': paper_data['citation_count'],
+            'influentialCitationCount': paper_data['influential_citation_count'],
+            'isOpenAccess': paper_data['is_open_access'],
+            'fieldsOfStudy': paper_data['fields_of_study'],
+            'embedding': {'vector': paper_data['embedding'], 'model': paper_data['embed_model']},
+            'authors': [{'authorId': a['author_id'], 'name': a['name']} for a in paper_data['authors']],
+            'citations': [{'paperId': r['paper_id'], 'title': r['title']} for r in paper_data['citations']],
+            'references': [{'paperId': r['paper_id'], 'title': r['title']} for r in paper_data['references']],
+            'at': paper_data['at'],
+        }
+        return Paper(**kwargs)
 
     def get_paper_id(self, title:str) -> str:
         params = {
@@ -63,65 +79,86 @@ class SemanticScholar(object):
         content = json.loads(response.read().decode('utf-8'))
         return Paper(**content)
 
-    def build_reference_graph(self, paper_id:str, min_influential_citation_count:int=1, cache:StrOrPath='__cache__/papers.zip', export_interval:int=1000):
+    def __show_progress__(self, total:int, done:int, start:float,
+                          export_papers:bool=False, graph_path:StrOrPath='',
+                          depth:int=1, paper:Paper=None, ci_paper:Paper=None):
+        res = (f' -> {done:5d}/{total:5d} ({done/total*100.0:5.1f}%) | '
+               f'etime: {timedelta2HMS(int(time.time() - start))} @{now().strftime("%H:%M:%S")}')
+        
+        if export_papers: 
+            res += f' | exported -> {len(self.papers):5d} papers'
+        if graph_path != '':
+            res += f' | exported -> {str(Path(graph_path).resolve().absolute())}'
+        if paper is not None and ci_paper is not None:
+            res += f' | papers: {len(self.papers):5d}'
+            res += f' | {paper.paper_id[:5]} -> {ci_paper.paper_id[:5]} @icc: {ci_paper.influential_citation_count:4d}'
+            res += f' | {"=" * (depth // 10)}{"-" * (depth % 10)}★'
+        print(res)
+
+    def build_reference_graph(self, paper_id:str, min_influential_citation_count:int=1, cache_dir:StrOrPath='__cache__/papers', export_interval:int=1000):
         '''build a reference graph
         
         Args:
             paper_id (str): if of the root paper
             min_influential_citation_count (int): number of citation count. ignore papers with the citation count under the threshold
-            cache (StrOrPath): path to cache. the cache file is assumed to be ".zip" format. 
+            cache (StrOrPath): path to cache directory
             export_interval (int): export cache with the specified interval
         '''
-        counter = {'total': 0, 'done': 0, 'new_papers':0, 'finished_papers': [], 'cache': Path(cache)}
+        stats = {'total': 0, 'done': 0, 'new_papers': [], 'finished_papers': [], 'cache_dir': Path(cache_dir)}
         start = time.time()
-        def process(ss:SemanticScholar, paper:Paper):
-            counter['total'] += len(paper.citations)
+        def process(ss:SemanticScholar, paper:Paper, depth:int):
+            stats['total'] += len(paper.citations)
+            graph_cache = stats['cache_dir'] / f'{paper_id}.graphml'
             for citation in paper.citations:
                 
-                if len(ss.papers) > 0 and counter['new_papers'] >= export_interval and len(ss.papers) % export_interval == 0:
-                    ss.export(counter['cache'])
-                    counter['new_papers'] = 0
-                    print(f' -> {counter["done"]:5d}/{counter["total"]:5d} ({counter["done"]/counter["total"]*100.0:5.1f}%) | '
-                          f'etime: {timedelta2HMS(int(time.time() - start))} @{now().strftime("%Y.%m.%d-%H:%M:%S")} | '
-                          f'exported -> {str(Path(counter["cache"]).resolve().absolute())}')
+                if len(ss.papers) > 0 and len(stats['new_papers']) >= export_interval and len(ss.papers) % export_interval == 0:
+                    self.export_papers(stats['new_papers'], stats['cache_dir'])
+                    self.__show_progress__(stats['total'], stats['done'], start, export_papers=True)
+                   
+                    self.export_graph(graph_cache)
+                    self.__show_progress__(stats['total'], stats['done'], start, graph_path=graph_cache)
+                   
+                    stats['new_papers'] = []
 
-                if counter['done'] > 0 and counter['done'] % 100 == 0:
-                    print(f' -> {counter["done"]:5d}/{counter["total"]:5d} ({counter["done"]/counter["total"]*100.0:5.1f}%) | '
-                          f'etime: {timedelta2HMS(int(time.time() - start))} @{now().strftime("%Y.%m.%d-%H:%M:%S")}')
+                if stats['done'] > 0 and stats['done'] % 100 == 0:
+                    self.__show_progress__(stats['total'], stats['done'], start)
 
                 if citation.paper_id is None:
-                    counter['done'] += 1
+                    stats['done'] += 1
                     continue
 
                 # get paper
                 if citation.paper_id in ss.papers:
-                    ci_paper = ss.__papers[citation.paper_id]
+                    ci_paper:Paper = ss.papers[citation.paper_id]
                 else:
                     try:
-                        ci_paper = self.get_paper_detail(citation.paper_id)
-                        ss.__papers[citation.paper_id] = ci_paper
-                        counter['new_papers'] += 1
+                        ci_paper:Paper = self.get_paper_detail(citation.paper_id)
+                        ss.papers[ci_paper.paper_id] = ci_paper
+                        stats['new_papers'].append(ci_paper)
                         time.sleep(2.5)
 
                     except Exception as ex:
                         print(f'Warning: {ex} @{citation.paper_id}')
-                        counter['done'] += 1
+                        stats['done'] += 1
                         continue
 
-                counter['done'] += 1
+                stats['done'] += 1
                 if ci_paper.influential_citation_count >= min_influential_citation_count:
                     self.add_edge(ss.graph, paper, ci_paper)
-                    print(f' -> {counter["done"]:5d}/{counter["total"]:5d} ({counter["done"]/counter["total"]*100.0:5.1f}%) | '
-                          f'etime: {timedelta2HMS(int(time.time() - start))} @{now().strftime("%Y.%m.%d-%H:%M:%S")} | '
-                          f'papers: {len(ss.papers):5d} | '
-                          f'{paper.paper_id[:8]} -> {citation.paper_id[:8]} @icc: {ci_paper.influential_citation_count}')
+                    self.__show_progress__(stats['total'], stats['done'], start, depth=depth, paper=paper, ci_paper=ci_paper)
 
-                    if ci_paper.paper_id not in counter['finished_papers']:
-                        counter['finished_papers'].append(ci_paper.paper_id)
-                        process(ss, ci_paper)
+                    if ci_paper.paper_id not in stats['finished_papers']:
+                        stats['finished_papers'].append(ci_paper.paper_id)
+                        process(ss, ci_paper, depth=depth+1)
 
         root_paper:Paper = self.get_paper_detail(paper_id)
-        process(self, root_paper)
+        process(self, root_paper, depth=1)
+
+        self.export_papers(stats['new_papers'], stats['cache_dir'])
+        self.__show_progress__(stats['total'], stats['done'], start, zip_path=stats['cache_dir'] / 'papers.zip')
+        self.export_graph(stats['cache_dir'] / f'{paper_id}.graphml')
+        self.__show_progress__(stats['total'], stats['done'], start, zip_path=stats['cache_dir'] / f'{paper_id}.graphml')
+        print('Done.')
 
     def add_edge(self, graph:nx.DiGraph, src:Paper, dst:Paper):
         graph.add_edge(src.paper_id, dst.paper_id)
@@ -141,50 +178,35 @@ class SemanticScholar(object):
             graph.nodes[paper.paper_id]['first_author_id'] = paper.authors[0].author_id if len(paper.authors) > 0 else ''
             graph.nodes[paper.paper_id]['first_fields_of_study'] = paper.fields_of_study[0] if len(paper.fields_of_study) > 0 else ''
 
-    def export(self, out_file:StrOrPath='papers.zip'):
-        assert len(self.__papers) > 0, 'Reference graph is not build yet.'
-        out_file:Path = Path(out_file)
-        out_file.parent.mkdir(parents=True, exist_ok=True)
+    def export_papers(self, new_papers:List[Paper], out_dir:StrOrPath='__cache__'):
+        out_dir:Path = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-        with zipfile.ZipFile(str(out_file), 'w', compression=zipfile.ZIP_DEFLATED) as zf:
-            for paper_id, paper in tqdm(self.__papers.items(), total=len(self.papers), desc='exporting...', leave=False):
-                if paper is None:
-                    continue
-                data = paper.to_dict()
-                zf.writestr(f'{paper_id}.json', json.dumps(data, ensure_ascii=False, indent=2))
+        for paper in tqdm(new_papers, desc='exporting...', leave=False):
+            d1, d2, d3 = paper.paper_id[:3]
+            outfile:Path = out_dir / d1 / d2 / d3 / f'{paper.paper_id}.json'
+            outfile.parent.mkdir(parents=True, exist_ok=True)
 
-        graphml_path = out_file.parent / (out_file.stem + '.graphml')
-        nx.write_graphml_lxml(self.graph, str(graphml_path.resolve().absolute()), encoding='utf-8', prettyprint=True, named_key_ids=True)
+            data = paper.to_dict()
+            json.dump(data, open(outfile, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
+
+    def export_graph(self, outfile:StrOrPath='papers.graphml'):
+        outfile:Path = Path(outfile)
+        outfile.parent.mkdir(parents=True, exist_ok=True)
+
+        nx.write_graphml_lxml(self.graph, str(outfile.resolve().absolute()), encoding='utf-8', prettyprint=True, named_key_ids=True)
 
     @staticmethod
     def from_cache(cache_path:StrOrPath, threshold=0.95):
         cache_path:Path = Path(cache_path)
-
-        papers = {}
-        with zipfile.ZipFile(str(cache_path), 'r') as zf:
-            for file_info in tqdm(zf.filelist, total=len(zf.filelist), desc='loading...'):
-                paper_id = Path(file_info.filename).stem
-                paper_data = json.loads(zf.read(file_info))
-                kwargs = {
-                    'paperId': paper_data['paper_id'],
-                    'url': paper_data['url'],
-                    'title': paper_data['title'],
-                    'abstract': paper_data['abstract'],
-                    'venue': paper_data['venue'],
-                    'year': paper_data['year'],
-                    'referenceCount': paper_data['reference_count'],
-                    'citationCount': paper_data['citation_count'],
-                    'influentialCitationCount': paper_data['influential_citation_count'],
-                    'isOpenAccess': paper_data['is_open_access'],
-                    'fieldsOfStudy': paper_data['fields_of_study'],
-                    'embedding': {'vector': paper_data['embedding'], 'model': paper_data['embed_model']},
-                    'authors': [{'authorId': a['author_id'], 'name': a['name']} for a in paper_data['authors']],
-                    'citations': [{'paperId': r['paper_id'], 'title': r['title']} for r in paper_data['citations']],
-                    'references': [{'paperId': r['paper_id'], 'title': r['title']} for r in paper_data['references']],
-                    'at': paper_data['at'],
-                }
-                papers[paper_id] = Paper(**kwargs)
-
+        
         ss = SemanticScholar(threshold=threshold)
-        ss.__papers = papers
+        print('Reading files from cache...')
+        cache_papers = [Path(f) for f in tqdm(glob(str(cache_path / '**' / '*.json'), recursive=True), leave=False)]
+        for cache_paper in tqdm(cache_papers, desc='Loading...', leave=False):
+            data = json.load(open(cache_paper))
+            paper = ss.dict2paper(data)
+            ss.papers[paper.paper_id] = paper
+
+        print(f'Loaded papers: {len(ss.papers)}')
         return ss

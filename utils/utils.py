@@ -12,4 +12,4 @@ def timedelta2HMS(total_sec:int) -> str:
     h = total_sec // 3600
     m = total_sec % 3600 // 60
     s = total_sec % 60
-    return f'{h:3d}h {m:2d}m {s:2d}s'
+    return f'{h:2d}h {m:2d}m {s:2d}s'
