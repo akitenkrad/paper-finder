@@ -1,4 +1,5 @@
 from typing import Dict, List
+import sys
 from pathlib import Path
 from attrdict import AttrDict
 import json
@@ -79,10 +80,10 @@ class SemanticScholar(object):
         content = json.loads(response.read().decode('utf-8'))
         return Paper(**content)
 
-    def __show_progress__(self, total:int, done:int, start:float,
+    def __show_progress__(self, total:int, done:int, start:float, leave:bool=True,
                           export_papers:bool=False, graph_path:StrOrPath='',
                           depth:int=1, paper:Paper=None, ci_paper:Paper=None):
-        res = (f' -> {done:5d}/{total:5d} ({done/total*100.0:5.1f}%) | '
+        res = (f' -> {done:5d}/{total:5d} ({done/total*100.0:5.2f}%) | '
                f'etime: {timedelta2HMS(int(time.time() - start))} @{now().strftime("%H:%M:%S")}')
         
         if export_papers: 
@@ -92,8 +93,12 @@ class SemanticScholar(object):
         if paper is not None and ci_paper is not None:
             res += f' | papers: {len(self.papers):5d}'
             res += f' | {paper.paper_id[:5]} -> {ci_paper.paper_id[:5]} @icc: {ci_paper.influential_citation_count:4d}'
-            res += f' | {"=" * (depth // 10)}{"-" * (depth % 10)}★'
-        print(res)
+            res += f' | {"=" * (depth // 100)}{"+" * ((depth % 100) // 10)}{"-" * (depth % 10)}★'
+        
+        if leave:
+            print(res)
+        else:
+            print('\r' + res, end='')
 
     def build_reference_graph(self, paper_id:str, min_influential_citation_count:int=1, cache_dir:StrOrPath='__cache__/papers', export_interval:int=1000):
         '''build a reference graph
@@ -104,6 +109,7 @@ class SemanticScholar(object):
             cache (StrOrPath): path to cache directory
             export_interval (int): export cache with the specified interval
         '''
+        sys.setrecursionlimit(10000)
         stats = {'total': 0, 'done': 0, 'new_papers': [], 'finished_papers': [], 'cache_dir': Path(cache_dir)}
         start = time.time()
         def process(ss:SemanticScholar, paper:Paper, depth:int):
@@ -112,6 +118,7 @@ class SemanticScholar(object):
             for citation in paper.citations:
                 
                 if len(ss.papers) > 0 and len(stats['new_papers']) >= export_interval and len(ss.papers) % export_interval == 0:
+                    if len(ss.papers) % 4 == 0: print(f'\r{" "*100}\r', end='')
                     self.export_papers(stats['new_papers'], stats['cache_dir'])
                     self.__show_progress__(stats['total'], stats['done'], start, export_papers=True)
                    
@@ -120,6 +127,8 @@ class SemanticScholar(object):
                    
                     stats['new_papers'] = []
 
+                if len(ss.papers) > 0 and len(ss.papers) % 5 == 0:
+                    self.__show_progress__(stats['total'], stats['done'], start, leave=False)
                 if stats['done'] > 0 and stats['done'] % 100 == 0:
                     self.__show_progress__(stats['total'], stats['done'], start)
 
@@ -135,7 +144,7 @@ class SemanticScholar(object):
                         ci_paper:Paper = self.get_paper_detail(citation.paper_id)
                         ss.papers[ci_paper.paper_id] = ci_paper
                         stats['new_papers'].append(ci_paper)
-                        time.sleep(2.5)
+                        time.sleep(3.0)
 
                     except Exception as ex:
                         print(f'Warning: {ex} @{citation.paper_id}')
