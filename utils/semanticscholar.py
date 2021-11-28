@@ -4,7 +4,7 @@ from pathlib import Path
 from attrdict import AttrDict
 import json
 import time
-import zipfile
+import pickle
 from tqdm import tqdm
 from glob import glob
 import urllib.request
@@ -16,10 +16,11 @@ from utils.common import Paper
 from utils.utils import StrOrPath, now, timedelta2HMS
 
 class SemanticScholar(object):
-    API = {
+    API:Dict[str, str] = {
         'search_by_title': 'https://api.semanticscholar.org/graph/v1/paper/search?{QUERY}',
         'search_by_id': 'https://api.semanticscholar.org/graph/v1/paper/{PAPER_ID}?{PARAMS}',
     }
+    CACHE_PATH:Path = Path('__cache__/papers.pickle')
     
     def __init__(self, threshold:float=0.95):
         self.__api = AttrDict(self.API)
@@ -95,10 +96,13 @@ class SemanticScholar(object):
             res += f' | {paper.paper_id[:5]} -> {ci_paper.paper_id[:5]} @icc: {ci_paper.influential_citation_count:4d}'
             res += f' | {"=" * (depth // 100)}{"+" * ((depth % 100) // 10)}{"-" * (depth % 10)}★'
         
+        if leave == False:
+            res = f'\r{res} | processing {done} papers...\r'
+
         if leave:
             print(res)
         else:
-            print('\r' + res, end='')
+            print(res, end='')
 
     def build_reference_graph(self, paper_id:str, min_influential_citation_count:int=1, cache_dir:StrOrPath='__cache__/papers', export_interval:int=1000):
         '''build a reference graph
@@ -117,6 +121,8 @@ class SemanticScholar(object):
             graph_cache = stats['cache_dir'] / f'{paper_id}.graphml'
             for citation in paper.citations:
                 
+                self.__show_progress__(stats['total'], stats['done'], start, leave=False)
+
                 if len(ss.papers) > 0 and len(stats['new_papers']) >= export_interval and len(ss.papers) % export_interval == 0:
                     if len(ss.papers) % 4 == 0: print(f'\r{" "*100}\r', end='')
                     self.export_papers(stats['new_papers'], stats['cache_dir'])
@@ -126,11 +132,6 @@ class SemanticScholar(object):
                     self.__show_progress__(stats['total'], stats['done'], start, graph_path=graph_cache)
                    
                     stats['new_papers'] = []
-
-                if len(ss.papers) > 0 and len(ss.papers) % 5 == 0:
-                    self.__show_progress__(stats['total'], stats['done'], start, leave=False)
-                if stats['done'] > 0 and stats['done'] % 100 == 0:
-                    self.__show_progress__(stats['total'], stats['done'], start)
 
                 if citation.paper_id is None:
                     stats['done'] += 1
@@ -191,6 +192,7 @@ class SemanticScholar(object):
         out_dir:Path = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
 
+        # save papers
         for paper in tqdm(new_papers, desc='exporting...', leave=False):
             d1, d2, d3 = paper.paper_id[:3]
             outfile:Path = out_dir / d1 / d2 / d3 / f'{paper.paper_id}.json'
@@ -199,6 +201,10 @@ class SemanticScholar(object):
             data = paper.to_dict()
             json.dump(data, open(outfile, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
 
+        # save cache data as pickle
+        SemanticScholar.CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        pickle.dump(self.papers, open(SemanticScholar.CACHE_PATH, 'wb'))
+
     def export_graph(self, outfile:StrOrPath='papers.graphml'):
         outfile:Path = Path(outfile)
         outfile.parent.mkdir(parents=True, exist_ok=True)
@@ -206,16 +212,22 @@ class SemanticScholar(object):
         nx.write_graphml_lxml(self.graph, str(outfile.resolve().absolute()), encoding='utf-8', prettyprint=True, named_key_ids=True)
 
     @staticmethod
-    def from_cache(cache_path:StrOrPath, threshold=0.95):
+    def from_cache(cache_path:StrOrPath, threshold:float=0.95, no_cache:bool=False):
         cache_path:Path = Path(cache_path)
         
         ss = SemanticScholar(threshold=threshold)
-        print('Reading files from cache...')
-        cache_papers = [Path(f) for f in tqdm(glob(str(cache_path / '**' / '*.json'), recursive=True), leave=False)]
-        for cache_paper in tqdm(cache_papers, desc='Loading...', leave=False):
-            data = json.load(open(cache_paper))
-            paper = ss.dict2paper(data)
-            ss.papers[paper.paper_id] = paper
+
+        if no_cache == False and SemanticScholar.CACHE_PATH.exists():
+            print('Loading from pickle cache...')
+            papers = pickle.load(open(SemanticScholar.CACHE_PATH, 'rb'))
+            ss.papers = papers
+        else:
+            print('Reading files from cache...')
+            cache_papers = [Path(f) for f in tqdm(glob(str(cache_path / '**' / '*.json'), recursive=True), leave=False)]
+            for cache_paper in tqdm(cache_papers, desc='Loading...', leave=False):
+                data = json.load(open(cache_paper))
+                paper = ss.dict2paper(data)
+                ss.papers[paper.paper_id] = paper
 
         print(f'Loaded papers: {len(ss.papers)}')
         return ss
