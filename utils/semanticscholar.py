@@ -9,6 +9,7 @@ from tqdm import tqdm
 from glob import glob
 import urllib.request
 import urllib.parse
+import socket
 from sumeval.metrics.rouge import RougeCalculator
 import networkx as nx
 
@@ -77,7 +78,16 @@ class SemanticScholar(object):
             'authors', 'citations', 'references', 'embedding'
         ]
         params = f'fields={",".join(fields)}'
-        response = urllib.request.urlopen(self.__api.search_by_id.format(PAPER_ID=paper_id, PARAMS=params))
+
+        retry = 0
+        while retry < 6:
+            try:
+                response = urllib.request.urlopen(self.__api.search_by_id.format(PAPER_ID=paper_id, PARAMS=params), timeout=5.0)
+                break
+            except socket.timeout:
+                retry += 1
+                print(f'API Timeout -> Retry: {retry}')
+
         content = json.loads(response.read().decode('utf-8'))
         return Paper(**content)
 
