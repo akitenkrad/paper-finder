@@ -28,7 +28,7 @@ class SemanticScholar(object):
         self.__rouge = RougeCalculator(stopwords=True, stemming=False, word_limit=-1, length_limit=-1, lang="en")
         self.__threshold = threshold
         self.graph:nx.DiGraph = nx.DiGraph()
-        self.papers:Dict[str, Paper] = {}
+        self.papers:Dict[str, Path] = {}
 
     @property
     def threshold(self) -> float:
@@ -131,16 +131,11 @@ class SemanticScholar(object):
             graph_cache = stats['cache_dir'] / f'{paper_id}.graphml'
             for citation in paper.citations:
                 
-                self.__show_progress__(stats['total'], stats['done'], start, leave=False)
+                ss.__show_progress__(stats['total'], stats['done'], start, leave=False)
 
                 if len(ss.papers) > 0 and len(stats['new_papers']) >= export_interval and len(ss.papers) % export_interval == 0:
-                    if len(ss.papers) % 4 == 0: print(f'\r{" "*100}\r', end='')
-                    self.export_papers(stats['new_papers'], stats['cache_dir'])
-                    self.__show_progress__(stats['total'], stats['done'], start, export_papers=True)
-                   
-                    self.export_graph(graph_cache)
-                    self.__show_progress__(stats['total'], stats['done'], start, graph_path=graph_cache)
-                   
+                    ss.export_graph(graph_cache)
+                    ss.__show_progress__(stats['total'], stats['done'], start, graph_path=graph_cache)
                     stats['new_papers'] = []
 
                 if citation.paper_id is None:
@@ -149,11 +144,12 @@ class SemanticScholar(object):
 
                 # get paper
                 if citation.paper_id in ss.papers:
-                    ci_paper:Paper = ss.papers[citation.paper_id]
+                    ci_paper:Paper = ss.get_paper(citation.paper_id)
                 else:
                     try:
                         ci_paper:Paper = self.get_paper_detail(citation.paper_id)
-                        ss.papers[ci_paper.paper_id] = ci_paper
+                        new_paper_path = ss.export_paper(ci_paper, cache_dir)
+                        ss.papers[ci_paper.paper_id] = new_paper_path
                         stats['new_papers'].append(ci_paper)
                         time.sleep(3.0)
 
@@ -198,22 +194,16 @@ class SemanticScholar(object):
             graph.nodes[paper.paper_id]['first_author_id'] = paper.authors[0].author_id if len(paper.authors) > 0 else ''
             graph.nodes[paper.paper_id]['first_fields_of_study'] = paper.fields_of_study[0] if len(paper.fields_of_study) > 0 else ''
 
-    def export_papers(self, new_papers:List[Paper], out_dir:StrOrPath='__cache__'):
+    def export_paper(self, paper:Paper, out_dir:StrOrPath='__cache__/papers') -> Path:
         out_dir:Path = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
+        d1, d2, d3 = paper.paper_id[:3]
+        outfile:Path = out_dir / d1 / d2 / d3 / f'{paper.paper_id}.json'
+        outfile.parent.mkdir(parents=True, exist_ok=True)
 
-        # save papers
-        for paper in tqdm(new_papers, desc='exporting...', leave=False):
-            d1, d2, d3 = paper.paper_id[:3]
-            outfile:Path = out_dir / d1 / d2 / d3 / f'{paper.paper_id}.json'
-            outfile.parent.mkdir(parents=True, exist_ok=True)
-
-            data = paper.to_dict()
-            json.dump(data, open(outfile, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
-
-        # save cache data as pickle
-        SemanticScholar.CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        pickle.dump(self.papers, open(SemanticScholar.CACHE_PATH, 'wb'))
+        data = paper.to_dict()
+        json.dump(data, open(outfile, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
+        return outfile
 
     def export_graph(self, outfile:StrOrPath='papers.graphml'):
         outfile:Path = Path(outfile)
@@ -221,23 +211,21 @@ class SemanticScholar(object):
 
         nx.write_graphml_lxml(self.graph, str(outfile.resolve().absolute()), encoding='utf-8', prettyprint=True, named_key_ids=True)
 
+    def get_paper(self, paper_id:str) -> Paper:
+        paper_path = self.papers[paper_id]
+        paper = self.dict2paper(json.load(open(paper_path)))
+        return paper
+
     @staticmethod
     def from_cache(cache_path:StrOrPath, threshold:float=0.95, no_cache:bool=False):
         cache_path:Path = Path(cache_path)
         
         ss = SemanticScholar(threshold=threshold)
 
-        if no_cache == False and SemanticScholar.CACHE_PATH.exists():
-            print('Loading from pickle cache...')
-            papers = pickle.load(open(SemanticScholar.CACHE_PATH, 'rb'))
-            ss.papers = papers
-        else:
-            print('Reading files from cache...')
-            cache_papers = [Path(f) for f in tqdm(glob(str(cache_path / '**' / '*.json'), recursive=True), leave=False)]
-            for cache_paper in tqdm(cache_papers, desc='Loading...', leave=False):
-                data = json.load(open(cache_paper))
-                paper = ss.dict2paper(data)
-                ss.papers[paper.paper_id] = paper
+        print('Reading files from cache...')
+        cache_papers = [Path(f) for f in tqdm(glob(str(cache_path / '**' / '*.json'), recursive=True), leave=False)]
+        for cache_paper in tqdm(cache_papers, desc='Loading...', leave=False):
+            ss.papers[cache_paper.stem] = cache_paper
 
         print(f'Loaded papers: {len(ss.papers)}')
         return ss
