@@ -7,6 +7,7 @@ import time
 import pickle
 from tqdm import tqdm
 from glob import glob
+from urllib.error import URLError, HTTPError
 import urllib.request
 import urllib.parse
 import socket
@@ -72,21 +73,39 @@ class SemanticScholar(object):
         return ''
 
     def get_paper_detail(self, paper_id:str) -> Paper:
-        fields = [
-            'paperId', 'url', 'title', 'abstract', 'venue', 'year',
-            'referenceCount', 'citationCount', 'influentialCitationCount', 'isOpenAccess', 'fieldsOfStudy',
-            'authors', 'citations', 'references', 'embedding'
-        ]
-        params = f'fields={",".join(fields)}'
 
+        def retry_and_wait(msg:str, ex:Exception, retry:int) -> int:
+            retry += 1
+            if 5 < retry: raise ex
+            if retry == 1: msg = '\n' + msg
+
+            print(msg)
+
+            if ex.errno == -3:
+                time.sleep(300.0)
+            else:
+                time.sleep(5.0)
+            return retry + 1
+ 
         retry = 0
-        while retry < 6:
+        while retry < 5:
             try:
+                fields = [
+                    'paperId', 'url', 'title', 'abstract', 'venue', 'year',
+                    'referenceCount', 'citationCount', 'influentialCitationCount', 'isOpenAccess', 'fieldsOfStudy',
+                    'authors', 'citations', 'references', 'embedding'
+                ]
+                params = f'fields={",".join(fields)}'
                 response = urllib.request.urlopen(self.__api.search_by_id.format(PAPER_ID=paper_id, PARAMS=params), timeout=5.0)
                 break
-            except socket.timeout:
-                retry += 1
-                print(f'API Timeout -> Retry: {retry}')
+            except HTTPError as ex:
+                retry = retry_and_wait(f'{str(ex)} -> Retry: {retry}', ex, retry)
+            except URLError as ex:
+                retry = retry_and_wait(f'{str(ex)} -> Retry: {retry}', ex, retry)
+            except socket.timeout as ex:
+                retry = retry_and_wait(f'API Timeout -> Retry: {retry}', ex, retry)
+            except Exception as ex:
+                retry = retry_and_wait(f'{str(ex)} -> Retry: {retry}', ex, retry)
 
         content = json.loads(response.read().decode('utf-8'))
         return Paper(**content)
