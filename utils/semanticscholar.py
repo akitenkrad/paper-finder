@@ -85,7 +85,7 @@ class SemanticScholar(object):
                 time.sleep(300.0)
             else:
                 time.sleep(5.0)
-            return retry + 1
+            return retry
  
         retry = 0
         while retry < 5:
@@ -113,7 +113,7 @@ class SemanticScholar(object):
     def __show_progress__(self, total:int, done:int, start:float, leave:bool=True,
                           export_papers:bool=False, graph_path:StrOrPath='',
                           depth:int=1, paper:Paper=None, ci_paper:Paper=None):
-        res = (f' -> {done:5d}/{total:5d} ({done/total*100.0:5.2f}%) | '
+        res = (f' -> {done:5d}/{total:5d} ({done / (total + 1e-10) * 100.0:5.2f}%) | '
                f'etime: {timedelta2HMS(int(time.time() - start))} @{now().strftime("%H:%M:%S")}')
         
         if export_papers: 
@@ -143,54 +143,59 @@ class SemanticScholar(object):
             export_interval (int): export cache with the specified interval
         '''
         sys.setrecursionlimit(10000)
-        stats = {'total': 0, 'done': 0, 'new_papers': [], 'finished_papers': [], 'cache_dir': Path(cache_dir)}
+        stats = {'total': 0, 'done': 0, 'paper_queue': [], 'new_papers': [], 'finished_papers': [], 'cache_dir': Path(cache_dir)}
+        graph_cache = stats['cache_dir'] / f'{paper_id}.graphml'
         start = time.time()
-        def process(ss:SemanticScholar, paper:Paper, depth:int):
-            stats['total'] += len(paper.citations)
-            graph_cache = stats['cache_dir'] / f'{paper_id}.graphml'
-            for citation in paper.citations:
-                
-                ss.__show_progress__(stats['total'], stats['done'], start, leave=False)
 
-                if len(ss.papers) > 0 and len(stats['new_papers']) >= export_interval and len(ss.papers) % export_interval == 0:
-                    ss.export_graph(graph_cache)
-                    ss.__show_progress__(stats['total'], stats['done'], start, graph_path=graph_cache)
-                    stats['new_papers'] = []
+        root_paper = self.get_paper_detail(paper_id)
+        stats['paper_queue'].insert(0, (root_paper, 0))
+        stats['total'] += len(root_paper.citations)
+        while 0 < len(stats['paper_queue']):
 
-                if citation.paper_id is None:
+            paper, depth = stats['paper_queue'].pop()
+
+            for ci_ref_paper in paper.citations:
+
+                if ci_ref_paper.paper_id is None:
                     stats['done'] += 1
                     continue
 
-                # get paper
-                if citation.paper_id in ss.papers:
-                    ci_paper:Paper = ss.get_paper(citation.paper_id)
+                # 1. show progress
+                self.__show_progress__(stats['total'], stats['done'], start, leave=False)
+
+                if len(self.papers) > 0 and len(stats['new_papers']) >= export_interval and len(self.papers) % export_interval == 0:
+                    self.export_graph(graph_cache)
+                    self.__show_progress__(stats['total'], stats['done'], start, graph_path=graph_cache)
+                    stats['new_papers'] = []
+
+                # 2. get paper detail
+                if ci_ref_paper.paper_id in self.papers:
+                    ci_paper:Paper = self.get_paper(ci_ref_paper.paper_id)
                 else:
                     try:
-                        ci_paper:Paper = self.get_paper_detail(citation.paper_id)
-                        new_paper_path = ss.export_paper(ci_paper, cache_dir)
-                        ss.papers[ci_paper.paper_id] = new_paper_path
+                        ci_paper:Paper = self.get_paper_detail(ci_ref_paper.paper_id)
+                        new_paper_path = self.export_paper(ci_paper, cache_dir)
+                        self.papers[ci_paper.paper_id] = new_paper_path
                         stats['new_papers'].append(ci_paper)
                         time.sleep(3.0)
 
                     except Exception as ex:
-                        print(f'Warning: {ex} @{citation.paper_id}')
+                        print(f'Warning: {ex} @{ci_ref_paper.paper_id}')
                         stats['done'] += 1
                         continue
 
+                # 3. add the new paper into the list
                 stats['done'] += 1
                 if ci_paper.influential_citation_count >= min_influential_citation_count:
-                    self.add_edge(ss.graph, paper, ci_paper)
+                    self.add_edge(self.graph, paper, ci_paper)
                     self.__show_progress__(stats['total'], stats['done'], start, depth=depth, paper=paper, ci_paper=ci_paper)
 
                     if ci_paper.paper_id not in stats['finished_papers']:
                         stats['finished_papers'].append(ci_paper.paper_id)
-                        process(ss, ci_paper, depth=depth+1)
+                        stats['paper_queue'].insert(0, (ci_paper, depth + 1))
+                        stats['total'] += len(ci_paper.citations)
 
-        root_paper:Paper = self.get_paper_detail(paper_id)
-        process(self, root_paper, depth=1)
-
-        self.export_papers(stats['new_papers'], stats['cache_dir'])
-        self.__show_progress__(stats['total'], stats['done'], start, zip_path=stats['cache_dir'] / 'papers.zip')
+        # post process
         self.export_graph(stats['cache_dir'] / f'{paper_id}.graphml')
         self.__show_progress__(stats['total'], stats['done'], start, zip_path=stats['cache_dir'] / f'{paper_id}.graphml')
         print('Done.')
