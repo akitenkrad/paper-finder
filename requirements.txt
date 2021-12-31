@@ -1,3 +1,4 @@
+arxiv>=1.4.2
 attrdict>=2.0.1
 click>=8.0.3
 networkx>=2.6.3
