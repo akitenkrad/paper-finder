@@ -137,6 +137,21 @@ class Paper(object):
         else:
             return value
     @property
+    def arxiv_id(self) -> str:
+        '''id from arxiv'''
+        value = self.__get('__arxiv_id', default='')
+        return value
+    @property
+    def arxiv_title(self) -> str:
+        '''title from arxiv'''
+        value = self.__get('__arxiv_title', default='')
+        return value
+    @property
+    def arxiv_hash(self) -> str:
+        '''hash from arxiv <- hashlib.md5((paper.title + paper.get_short_id()).encode('utf-8')).hexdigest()'''
+        value = self.__get('__arxiv_hash', default='')
+        return value
+    @property
     def at(self) -> datetime:
         '''timestamp'''
         ts = self.__get('__at', default=0)
@@ -178,6 +193,9 @@ class Paper(object):
             'categories': [{'category': cat} for cat in self.categories],
             'updated': self.updated.strftime('%Y-%m-%d %H:%M:%S') if isinstance(self.updated, datetime) else '',
             'published': self.published.strftime('%Y-%m-%d %H:%M:%S') if isinstance(self.published, datetime) else '',
+            'arxiv_hash': self.arxiv_hash,
+            'arxiv_id': self.arxiv_id,
+            'arxiv_title': self.arxiv_title,
             'at': self.__get('__at', default=0),
         }
  
@@ -204,6 +222,9 @@ class Paper(object):
             'categories': [cat['category'] for cat in paper_data['categories']] if 'categories' in paper_data else [],
             'updated': date_parse(paper_data['updated']) if 'updated' in paper_data and paper_data['updated'] != '' else None,
             'published': date_parse(paper_data['published']) if 'published' in paper_data and paper_data['published'] != '' else None,
+            'arxiv_hash': paper_data['arxiv_hash'] if 'arxiv_hash' in paper_data else '',
+            'arxiv_id': paper_data['arxiv_id'] if 'arxiv_id' in paper_data else '',
+            'arxiv_title': paper_data['arxiv_title'] if 'arxiv_title' in paper_data else '',
             'at': paper_data['at'],
         }
         return Paper(**kwargs)

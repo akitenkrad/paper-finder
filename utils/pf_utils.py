@@ -53,14 +53,13 @@ class PaperFinderUtil(object):
             for arxiv_paper_path in it:
                 arxiv_paper = json.load(open(arxiv_paper_path))
 
-                if 'ss_id' in arxiv_paper and len(arxiv_paper['ss_id']) > 0:
-                    it.set_description(arxiv_paper['ss_id'])
-                    continue
-
                 try:
                     # 1. get title
-                    title = re.sub(r'\$.+\$', '', arxiv_paper['title'], count=100).strip()
-                    paper_id = self.ss.get_paper_id(title)
+                    if 'ss_id' in arxiv_paper and len(arxiv_paper['ss_id']) > 0:
+                        paper_id = arxiv_paper['ss_id']
+                    else:
+                        title = re.sub(r'\$.+\$', '', arxiv_paper['title'], count=100).strip()
+                        paper_id = self.ss.get_paper_id(title)
 
                     it.set_description(paper_id)
 
@@ -91,6 +90,9 @@ class PaperFinderUtil(object):
                         'categories': arxiv_paper['categories'],
                         'updated': updated,
                         'published': published,
+                        'arxiv_hash': arxiv_hash['hash'],
+                        'arxiv_id': arxiv_paper['id'],
+                        'arxiv_title': arxiv_paper['title'],
                     }
                     paper.add_fields(**kwargs)
 

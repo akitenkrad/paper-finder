@@ -28,9 +28,10 @@ class ArXiv(object):
 
         with tqdm() as pbar:
             for paper in res.results():
-                paper_id = hashlib.md5((paper.title + paper.get_short_id()).encode('utf-8')).hexdigest()
+                paper_hash = hashlib.md5((paper.title + paper.get_short_id()).encode('utf-8')).hexdigest()
                 data = {
-                    'id': paper_id,
+                    'id': paper.entry_id,
+                    'hash': paper_hash,
                     'title': paper.title,
                     'authors': [{'name': author.name} for author in paper.authors],
                     'summary': paper.summary,
@@ -44,7 +45,7 @@ class ArXiv(object):
                     'ss_id': '',
                 }
                 
-                paper_path = Path(save_dir) / paper_id[0] / paper_id[1] / paper_id[2] / f'{paper_id}.json'
+                paper_path = Path(save_dir) / paper_hash[0] / paper_hash[1] / paper_hash[2] / f'{paper_hash}.json'
                 pbar.set_description(f'{str(paper_path.resolve().absolute())}')
                 pbar.update(1)
 

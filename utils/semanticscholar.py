@@ -3,6 +3,8 @@ from pathlib import Path
 from attrdict import AttrDict
 import json
 import time
+import string
+import re
 from urllib.error import URLError, HTTPError
 import urllib.request
 import urllib.parse
@@ -43,6 +45,12 @@ class SemanticScholar(object):
 
     def get_paper_id(self, title:str) -> str:
 
+        # remove punctuation
+        title = title
+        for punc in string.punctuation:
+            title = title.replace(punc, ' ')
+        title = re.sub(r'\s\s+', ' ', title, count=1000)
+
         retry = 0
         while retry < 5:
             try:
@@ -71,7 +79,13 @@ class SemanticScholar(object):
                 return ''
 
         for item in content['data']:
-            score = self.__rouge.rouge_l(summary=title.lower(), references=item['title'].lower())
+            # remove punctuation
+            ref_str = item['title'].lower()
+            for punc in string.punctuation:
+                ref_str = ref_str.replace(punc, ' ')
+            ref_str = re.sub(r'\s\s+', ' ', ref_str, count=1000)
+            
+            score = self.__rouge.rouge_l(summary=title.lower(), references=ref_str)
             if score > self.threshold:
                 return item['paperId'].strip()
         return ''
