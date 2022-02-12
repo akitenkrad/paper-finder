@@ -90,7 +90,7 @@ class PaperFinderUtil(object):
                         'categories': arxiv_paper['categories'],
                         'updated': updated,
                         'published': published,
-                        'arxiv_hash': arxiv_hash['hash'],
+                        'arxiv_hash': arxiv_paper['hash'],
                         'arxiv_id': arxiv_paper['id'],
                         'arxiv_title': arxiv_paper['title'],
                     }
@@ -110,6 +110,7 @@ class PaperFinderUtil(object):
             min_influential_citation_count:int=1,
             max_depth:int=3,
             cache_dir:StrOrPath='__cache__/papers',
+            graph_dir:StrOrPath='__cache__/graphs',
             export_interval:int=1000):
         '''build a reference graph
         
@@ -121,8 +122,18 @@ class PaperFinderUtil(object):
             export_interval (int): export cache with the specified interval
         '''
         sys.setrecursionlimit(10000)
-        stats = {'total': 0, 'done': 0, 'paper_queue': [], 'new_papers': [], 'finished_papers': [], 'cache_dir': Path(cache_dir)}
-        graph_cache = stats['cache_dir'] / f'{paper_id}.graphml'
+        stats = {
+            'total': 0,
+            'done': 0,
+            'paper_queue': [],
+            'new_papers': [],
+            'finished_papers': [],
+            'cache_dir': Path(cache_dir),
+            'graph_dir': Path(graph_dir),
+        }
+        stats['cache_dir'].mkdir(parents=True, exist_ok=True)
+        stats['graph_dir'].mkdir(parents=True, exist_ok=True)
+        graph_cache = stats['graph_dir'] / f'{paper_id}.graphml'
         start = time.time()
 
         root_paper = self.get_paper(paper_id)
@@ -173,9 +184,8 @@ class PaperFinderUtil(object):
                         stats['total'] += len(ci_paper.citations)
 
         # post process
-        self.export_graph(stats['cache_dir'] / f'{paper_id}.graphml')
-        self.__show_progress__(stats['total'], stats['done'], start, zip_path=stats['cache_dir'] / f'{paper_id}.graphml')
-        print('Done.')
+        self.export_graph(stats['graph_dir'] / f'{paper_id}.graphml')
+        print('Done.\n')
 
     def __add_edge(self, graph:nx.DiGraph, src:Paper, dst:Paper):
         graph.add_edge(src.paper_id, dst.paper_id)
@@ -209,6 +219,7 @@ class PaperFinderUtil(object):
 
     def export_graph(self, outfile:StrOrPath='papers.graphml'):
         outfile:Path = Path(outfile)
+        outfile = outfile.parent / outfile.stem[0] / outfile.stem[1] / outfile.stem[2] / outfile.name
         outfile.parent.mkdir(parents=True, exist_ok=True)
 
         nx.write_graphml_lxml(self.graph, str(outfile.resolve().absolute()), encoding='utf-8', prettyprint=True, named_key_ids=True)
