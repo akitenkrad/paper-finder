@@ -122,7 +122,7 @@ class PaperFinderUtil(object):
             export_interval (int): export cache with the specified interval
         '''
         TemporaryPaper = namedtuple('TemporaryPaper', (
-            'paper_id', 'name', 'title', 'year', 'venue', 'citations', 'references',
+            'paper_id', 'title', 'year', 'venue', 'citations', 'references',
             'reference_count', 'citation_count', 'influential_citation_count',
             'authors', 'primary_category',
         ))
@@ -190,7 +190,7 @@ class PaperFinderUtil(object):
                     if ci_paper.paper_id not in stats['finished_papers']:
                         stats['finished_papers'].append(ci_paper.paper_id)
                         temp_paper = TemporaryPaper(
-                            ci_paper.paper_id, ci_paper.name, ci_paper.title, ci_paper.year, ci_paper.venue,
+                            ci_paper.paper_id, ci_paper.title, ci_paper.year, ci_paper.venue,
                             ci_paper.citations, ci_paper.references, ci_paper.reference_count, ci_paper.citation_count,
                             ci_paper.influential_citation_count, ci_paper.authors, ci_paper.primary_category
                         )
