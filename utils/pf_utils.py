@@ -7,6 +7,7 @@ import re
 from tqdm import tqdm
 from glob import glob
 from dateutil.parser import parse as date_parse
+from collections import namedtuple
 import networkx as nx
 
 from utils.common import Paper
@@ -103,8 +104,7 @@ class PaperFinderUtil(object):
                 except Exception as ex:
                     print(f'Warning: {ex} @{arxiv_paper["title"]}')
                     continue
-                    
-            
+
     def build_reference_graph(self,
             paper_id:str,
             min_influential_citation_count:int=1,
@@ -121,7 +121,13 @@ class PaperFinderUtil(object):
             cache_dir (StrOrPath): path to cache directory
             export_interval (int): export cache with the specified interval
         '''
+        TemporaryPaper = namedtuple('TemporaryPaper', (
+            'paper_id', 'name', 'title', 'year', 'venue', 'citations', 'references',
+            'reference_count', 'citation_count', 'influential_citation_count',
+            'authors', 'primary_category',
+        ))
         sys.setrecursionlimit(10000)
+        self.graph:nx.DiGraph = nx.DiGraph()
         stats = {
             'total': 0,
             'done': 0,
@@ -144,6 +150,9 @@ class PaperFinderUtil(object):
             paper, depth = stats['paper_queue'].pop()
 
             if max_depth < depth:
+                while len(stats['paper_queue']) > 0:
+                    paper, _ = stats['paper_queue'].pop()
+                    del paper
                 return
 
             for ci_ref_paper in paper.citations:
@@ -165,7 +174,7 @@ class PaperFinderUtil(object):
                     ci_paper:Paper = self.get_paper(ci_ref_paper.paper_id)
                     new_paper_path = self.export_paper(ci_paper, cache_dir)
                     self.papers[ci_paper.paper_id] = new_paper_path
-                    stats['new_papers'].append(ci_paper)
+                    stats['new_papers'].append(ci_paper.paper_id)
 
                 except Exception as ex:
                     print(f'Warning: {ex} @{ci_ref_paper.paper_id}')
@@ -180,7 +189,12 @@ class PaperFinderUtil(object):
 
                     if ci_paper.paper_id not in stats['finished_papers']:
                         stats['finished_papers'].append(ci_paper.paper_id)
-                        stats['paper_queue'].insert(0, (ci_paper, depth + 1))
+                        temp_paper = TemporaryPaper(
+                            ci_paper.paper_id, ci_paper.name, ci_paper.title, ci_paper.year, ci_paper.venue,
+                            ci_paper.citations, ci_paper.references, ci_paper.reference_count, ci_paper.citation_count,
+                            ci_paper.influential_citation_count, ci_paper.authors, ci_paper.primary_category
+                        )
+                        stats['paper_queue'].insert(0, (temp_paper, depth + 1))
                         stats['total'] += len(ci_paper.citations)
 
         # post process
@@ -203,7 +217,6 @@ class PaperFinderUtil(object):
             graph.nodes[paper.paper_id]['influential_citation_count'] = paper.influential_citation_count
             graph.nodes[paper.paper_id]['first_author_name'] = paper.authors[0].name if len(paper.authors) > 0 else ''
             graph.nodes[paper.paper_id]['first_author_id'] = paper.authors[0].author_id if len(paper.authors) > 0 else ''
-            graph.nodes[paper.paper_id]['first_fields_of_study'] = paper.fields_of_study[0] if len(paper.fields_of_study) > 0 else ''
             graph.nodes[paper.paper_id]['primary_category'] = paper.primary_category
 
     def export_paper(self, paper:Paper, out_dir:StrOrPath='__cache__/papers') -> Path:
@@ -233,7 +246,7 @@ class PaperFinderUtil(object):
         return paper
 
     @staticmethod
-    def from_cache(cache_path:StrOrPath, threshold:float=0.95, no_cache:bool=False):
+    def from_cache(cache_path:StrOrPath):
         cache_path:Path = Path(cache_path)
         
         pf_util = PaperFinderUtil()
