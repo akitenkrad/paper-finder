@@ -62,7 +62,7 @@ class SemanticScholar(object):
                 }
                 response = urllib.request.urlopen(self.__api.search_by_title.format(QUERY=urllib.parse.urlencode(params)), timeout=5.0)
                 content = json.loads(response.read().decode('utf-8'))
-                time.sleep(3.0)
+                time.sleep(3.5)
                 break
 
             except HTTPError as ex:
@@ -102,7 +102,7 @@ class SemanticScholar(object):
                 ]
                 params = f'fields={",".join(fields)}'
                 response = urllib.request.urlopen(self.__api.search_by_id.format(PAPER_ID=paper_id, PARAMS=params), timeout=5.0)
-                time.sleep(3.0)
+                time.sleep(3.5)
                 break
 
             except HTTPError as ex:
