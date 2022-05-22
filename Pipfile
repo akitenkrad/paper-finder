@@ -1,0 +1,29 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+arxiv = "*"
+attrdict = "*"
+click = "*"
+networkx = "*"
+numpy = "*"
+pandas = "*"
+seaborn = "*"
+sumeval = "*"
+tqdm = "*"
+memory-profiler = "*"
+
+[dev-packages]
+daal = "*"
+isort = "*"
+mypy = "*"
+flake8 = "*"
+black = "*"
+frozen-flask = "*"
+types-PyYAML = "*"
+ipython = "*"
+
+[requires]
+python_version = "3.9"
